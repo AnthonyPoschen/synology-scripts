@@ -113,7 +113,6 @@ func mapShowSeasons(path string, wg *sync.WaitGroup, ch chan<- Shows) {
 		}
 		return nil
 	})
-
 	ch <- Shows{path, seasons}
 	wg.Done()
 }

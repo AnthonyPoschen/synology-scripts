@@ -35,7 +35,7 @@ func main() {
 	flag.BoolVar(&testmode, "t", false, "If present test mode is enabled")
 	flag.BoolVar(&testmode, "test", false, "If present test mode is enabled")
 	flag.Parse()
-	tvshows = make([]string, 0, 20)
+	tvshows = make([]string, 0)
 	sep = "/"
 	if runtime.GOOS == "windows" {
 		sep = "\\"
@@ -53,7 +53,6 @@ func main() {
 	fmt.Println("Changing Dir:", TVRootDir)
 	os.Chdir(TVRootDir)
 	filepath.Walk(".", getTvShows)
-
 	wg := sync.WaitGroup{}
 	wg.Add(len(tvshows))
 	ch := make(chan Shows, len(tvshows))
@@ -139,108 +138,153 @@ func parseShow(s Shows, wg *sync.WaitGroup) {
 
 func parseSeason(path string, wgs *sync.WaitGroup) {
 	f, err := filepath.Glob(path + sep + "*")
-	showpath := strings.Split(path, sep)[0]
-	// short hand season identifier for this parse. i.e 'S01'
-	shSeason := pathToSeasonString(path)
 
 	if err != nil {
 		log.Println("Failed to search path in parse season with path:", path+"/*")
 	}
+	// for every file and folder
 	for _, n := range f {
 		fi, err := os.Stat(n)
 		if err != nil {
 			continue
 		}
+		// if the object is a folder
 		if fi.Mode().IsDir() {
 			// some weird directory in snyology folders
+			// lets skip this
 			if strings.Contains(fi.Name(), "@eaDir") {
 				continue
 			}
-			// move it back to the show directory to be handled. sinc
-			if testmode {
-				log.Println(testtext+"Move Folder:", n, "| To new folder |", showpath+sep+fi.Name())
-			} else {
-				log.Println("Move Folder:", n, "| To new folder |", showpath+sep+fi.Name())
-				os.Rename(n, showpath+sep+fi.Name())
-			}
-		} else {
-			ext := filepath.Ext(fi.Name())
-			if !isExtAVideo(ext) && !isExtIgnoreListed(ext) {
-				// if its not a video mark for deletion
-				if testmode {
-					log.Println("Removing non video file:", n)
-				} else {
-					os.Remove(n)
-				}
-			} else {
-				// since it is a video lets check it follows the naming Convention
-				videoName := fi.Name()
+			// move it back to the show directory to be handled. since it doesnt belong
+			// lets get the video out
+			log.Println("Found Folder in Season Folder")
 
-				// is video in correct season folder
-				if !regexp.MustCompile("(?i).*" + shSeason + ".*").Match([]byte(videoName)) {
-					// check if file format is presented correctly and we are just in the wrong folder
-					if regexp.MustCompile("(?i).*S[0-9][0-9].*").Match([]byte(videoName)) {
-						// ok so we are definetly in the wrong season folder so lets move this file back to the show folder.
-						// to get organised later.
-						if testmode {
-							log.Println(testtext+"Video in wrong Season Folder Moved up a dir:", n)
-						} else {
-							log.Println(testtext+"Video in wrong Season Folder Moved up a dir:", n)
-							os.Rename(n, showpath+sep+videoName)
-						}
-						// since the file is no longer in the folder lets move on
+			// instead of moving back a directory lets fetch our video and move that up a directory
+			// and then cleanup the folder so everything is golden :).
+			/*
+				if testmode {
+					log.Println(testtext+"Move Folder:", n, "| To new folder |", showpath+sep+fi.Name())
+				} else {
+					log.Println("Move Folder:", n, "| To new folder |", showpath+sep+fi.Name())
+					os.Rename(n, showpath+sep+fi.Name())
+				}
+				continue
+			*/
+			// we must fetch all files in this folder incase multiple video files and simply
+			// move back the biggest file since that is always the main video.
+
+			files, err := filepath.Glob(path + sep + fi.Name() + sep + "*")
+			if err != nil {
+				continue
+			}
+			mainvideo := ""
+			for _, v := range files {
+				ext := filepath.Ext(v)
+				if isExtAVideo(ext) {
+					if mainvideo == "" {
+						mainvideo = v
 						continue
 					}
-					// ok so the file is using a different format then SxxExx so lets see if it starts with a number
-					// TODO: the above shit
-					// for now just skip files like this since can always manually change. sometimues u forget this is all still inside a for loop jesus
-					// cant wait to refactor this bullshit big loop once its working.
-					log.Println("Cant work out Season or Episode(add S00E00):", showpath+sep+videoName)
-					continue
+					mf, _ := os.Stat(mainvideo)
+					nf, _ := os.Stat(v)
+					if nf.Size() > mf.Size() {
+						mainvideo = v
+					}
 				}
-				// presuming we have a file that is in the correct season folder.
-				// lets get the episode number and see if it is already correctly formated i.e 'ShowName.SxxExx'
-				videoNameNoExt := strings.Replace(videoName, ext, "", 1)
-				if !regexp.MustCompile("(?i)^" + showpath + ".S[0-9][0-9]E[0-9][0-9]$").Match([]byte(videoNameNoExt)) {
-					// so the file name is 100% match. lets grab the episode number and work out what it should be labeled.
-					// we want the first match
-					match := regexp.MustCompile("(?i)(E[0-9][0-9])").FindStringSubmatch(videoName)[0]
-					if len(match) == 3 {
-						actualname := showpath + "." + shSeason + match + ext
+			}
 
-						// err will be returned if it doesn't exsist. which means we can just rename
-						file1, err := os.Stat(path + sep + actualname)
-						if err != nil {
-							// if we cant find a file by that name and type we are good to go.
-							log.Println("File Doesnt exsist cool to rename,", path+sep+videoName, "TO", path+sep+actualname)
-							os.Rename(path+sep+videoName, path+sep+actualname)
-						} else {
-							// if one does already exist time to check file sizes. bigger is always better right ;)
-							file2, _ := os.Stat(path + sep + videoName)
+			if mainvideo == "" {
+				// do not delete the folder incase its a place holder we only want to target video folders
+				continue
+			}
+			// now that we know we have a video lets copy it out one directory.
+			//dir := filepath.Dir(mainvideo)
+			newDir := filepath.Dir(mainvideo)
+			index := strings.LastIndex(newDir, sep)
+			if index == -1 {
+				// should never happen to panic basically
+				continue
+			}
+			newDir = newDir[:index]
+			//newDir := filepath.Dir(mainvideo) + sep + ".." + sep
+			mf, _ := os.Stat(mainvideo)
+			NewFileName := newDir + sep + mf.Name()
+			if testmode {
 
-							if file2.Size() > file1.Size() {
-								if testmode {
-									log.Println(testtext+"Replacing:", path+sep+actualname, "With:", path+sep+videoName)
-								} else {
-									log.Println("Replacing:", path+sep+actualname, "With:", path+sep+videoName)
-									os.Remove(path + sep + actualname)
-									os.Rename(path+sep+videoName, path+sep+actualname)
-								}
+				log.Println("Moved File,", mainvideo, ", to,", NewFileName)
 
-							} else {
-								if testmode {
-									log.Println(testtext+"Removing File:", path+sep+videoName)
-								} else {
-									log.Println("Removing File:", path+sep+videoName)
-									os.Remove(path + sep + videoName)
-								}
+			} else {
+				os.Rename(mainvideo, NewFileName)
+				os.RemoveAll(n)
+			}
+			// lets now change the fito be this new file
+			n = NewFileName
+			fi, err = os.Stat(NewFileName)
+			if err != nil {
+				log.Println("Error", err)
+				continue
+			}
 
+		}
+
+		ext := filepath.Ext(fi.Name())
+
+		// if it is not a video
+		if !isExtAVideo(ext) && !isExtIgnoreListed(ext) {
+			if testmode {
+				log.Println("Removing non video file:", n)
+			} else {
+				os.Remove(n)
+			}
+			continue
+			// if it is a video
+		}
+		// lets get the current Show Name and Season number so we can properly determine format
+		showName := ""
+		seasonNumber := ""
+		for k, v := range strings.Split(path, sep) {
+			if k == 0 {
+				showName = v
+			}
+			if k == 1 {
+				if strings.Contains(v, "Season ") || strings.Contains(v, "season ") {
+					seasonNumber = v[7:]
+					// this section is if we want to put a 0 infront if season is less than 10
+					/*
+						num, err := strconv.Atoi(seasonNumber)
+						if err == nil {
+							if num < 10 {
+								seasonNumber = "0" + seasonNumber
 							}
 						}
-					}
-
+					*/
 				}
-				// do stuff if name is already perfect maybe?
+			}
+		}
+		// now we must workout what episode number we are on
+		//sxxexx
+		//SxxExx
+		//xxx
+		// ?i = case insensitive
+		// () is a group
+		// | is the alternate group
+		// {} is ammount of previous token
+		reg := regexp.MustCompile("(?i)(\\.s[0-9]{2}e[0-9]{2}\\.|(\\.[0-9]{3}\\.)| [0-9]{3}\\.)")
+		if reg.Match([]byte(fi.Name())) {
+			// we found a valid file.
+			// lets now fetch this match point.
+
+			showEpisode := reg.FindString(fi.Name())
+
+			showEpisode = showEpisode[len(showEpisode)-3 : len(showEpisode)-1]
+			idealName := showName + " " + seasonNumber + showEpisode + ext
+			if fi.Name() != idealName {
+				if testmode {
+					log.Println("Renaming File:", fi.Name(), "to", idealName)
+				} else {
+					desiredLoc := path + sep + idealName
+					os.Rename(n, desiredLoc)
+				}
 			}
 		}
 	}

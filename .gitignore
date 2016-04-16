@@ -1,2 +1,13 @@
 tv-show-organiser/hello world
 tv-show-organiser/TV
+tv-show-organiser/hello_world.exe
+tv-show-organiser/logs/ShowOrganiserLog.log
+tv-show-organiser/tv-show-organiser.exe
+tv-show-organiser/.vscode/settings.json
+tv-show-organiser/.vscode/launch.json
+testing/.vscode/launch.json
+testing/debug
+testing/main.exe
+testing/testing.exe
+tv-show-organiser/debug
+tv-show-organiser/tv-show-organiser

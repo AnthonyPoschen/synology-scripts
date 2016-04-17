@@ -173,28 +173,36 @@ func parseSeason(path string, wgs *sync.WaitGroup) {
 			// we must fetch all files in this folder incase multiple video files and simply
 			// move back the biggest file since that is always the main video.
 
-			files, err := filepath.Glob(path + sep + fi.Name() + sep + "*")
+			d, err := os.Open(n)
+			defer d.Close()
 			if err != nil {
+				log.Println("Error opening directory,", err)
+				continue
+			}
+			dfi, err := d.Readdir(-1)
+			if err != nil {
+				log.Println("Error Reading Directory", d.Name(), err)
 				continue
 			}
 			mainvideo := ""
-			for _, v := range files {
-				ext := filepath.Ext(v)
+			for _, v := range dfi {
+				ext := filepath.Ext(v.Name())
 				if isExtAVideo(ext) {
 					if mainvideo == "" {
-						mainvideo = v
+						mainvideo = n + sep + v.Name()
 						continue
 					}
-					mf, _ := os.Stat(mainvideo)
-					nf, _ := os.Stat(v)
+					mf, _ := os.Stat(n + sep + mainvideo)
+					nf, _ := os.Stat(n + sep + v.Name())
 					if nf.Size() > mf.Size() {
-						mainvideo = v
+						mainvideo = n + sep + v.Name()
 					}
 				}
 			}
 
 			if mainvideo == "" {
 				// do not delete the folder incase its a place holder we only want to target video folders
+				log.Println("Found no Videos in", n+sep+"*.*")
 				continue
 			}
 			// now that we know we have a video lets copy it out one directory.
@@ -202,7 +210,8 @@ func parseSeason(path string, wgs *sync.WaitGroup) {
 			newDir := filepath.Dir(mainvideo)
 			index := strings.LastIndex(newDir, sep)
 			if index == -1 {
-				// should never happen to panic basically
+				// should never happen so panic basically
+				log.Println("HOW JUST HOW, NewDir:", newDir, "sep:", sep, "MainVideo:", mainvideo, "Index:", index)
 				continue
 			}
 			newDir = newDir[:index]
@@ -214,8 +223,16 @@ func parseSeason(path string, wgs *sync.WaitGroup) {
 				log.Println("Moved File,", mainvideo, ", to,", NewFileName)
 
 			} else {
-				os.Rename(mainvideo, NewFileName)
-				os.RemoveAll(n)
+				log.Println("Moving File up a folder, \nOLD:", mainvideo, "\nNEW:", NewFileName)
+				err := os.Rename(mainvideo, NewFileName)
+				if err != nil {
+					log.Println("Error changing video name Cur:", mainvideo, "New", NewFileName, "Err:", err)
+				}
+				log.Println("Removing Folder:", n)
+				err = os.RemoveAll(n)
+				if err != nil {
+					log.Println("Error Removing Directory:", n, "Err:", err)
+				}
 			}
 			// lets now change the fito be this new file
 			n = NewFileName
